@@ -1,0 +1,14 @@
+{
+  "aria2_conf_path": "/opt/aria2/aria2.conf",
+  "backup_enabled": true,
+  "backup_suffix": ".bak",
+  "tracker_sources": [
+    "https://trackerslist.com/all.txt",
+    "https://ngosang.github.io/trackerslist/trackers_all.txt",
+    "https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/all.txt"
+  ],
+  "request_timeout": 10,
+  "max_retries": 3,
+  "log_level": "INFO",
+  "log_file": "bt_tracker_update.log"
+}
