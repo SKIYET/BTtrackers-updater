@@ -5,7 +5,8 @@
   "tracker_sources": [
     "https://trackerslist.com/all.txt",
     "https://ngosang.github.io/trackerslist/trackers_all.txt",
-    "https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/all.txt"
+    "https://raw.githubusercontent.com/XIU2/TrackersListCollection/master/all.txt",
+    "https://raw.githubusercontent.com/DeSireFire/animeTrackerList/master/AT_all.txt"
   ],
   "request_timeout": 10,
   "max_retries": 3,

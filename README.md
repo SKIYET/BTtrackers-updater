@@ -1,41 +1,83 @@
 # Aria2 BT Tracker 自动更新工具
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
+
 一个用于自动更新 Aria2 BT Tracker 列表的 Python 脚本，帮助保持 Aria2 的 BT Tracker 始终最新，提升下载的连通性和速度。
 
-## 功能特性
+## ✨ 功能特性
 
-- 🔄 从多个公开的 Tracker 列表源获取最新的 BT Tracker 地址
-- 🔗 自动合并现有配置和新获取的 Tracker，智能去重
-- 💾 修改配置前自动备份原文件，保障安全
-- 📝 完善的日志记录和异常处理
-- ⚙️ 支持配置文件自定义设置
-- 🔁 支持重试机制，提高获取成功率
-- ✅ Tracker 格式验证，确保有效性
+- 🚀 **一键安装**: 支持 curl/wget 一键安装，无需手动配置
+- 🔄 **多源获取**: 从多个公开的 Tracker 列表源获取最新地址
+- 🔗 **智能合并**: 自动合并现有配置和新获取的 Tracker，智能去重
+- 💾 **安全备份**: 修改配置前自动备份原文件，保障安全
+- ⏰ **定时更新**: 使用 cron 定时任务，每天自动更新
+- 📝 **完善日志**: 详细的日志记录和异常处理
+- ⚙️ **灵活配置**: 支持配置文件自定义设置
+- 🔁 **重试机制**: 支持重试机制，提高获取成功率
+- ✅ **格式验证**: Tracker 格式验证，确保有效性
+- 🗑️ **一键卸载**: 支持完整卸载，包含配置备份
+
+## 快速开始
+
+### 一键安装 (推荐)
+
+```bash
+# 使用 curl 一键安装
+curl -fsSL https://raw.githubusercontent.com/yuanweize/BTtrackers-updater/main/quick-install.sh | sudo bash
+```
+
+或者使用 wget：
+
+```bash
+# 使用 wget 一键安装
+wget -qO- https://raw.githubusercontent.com/yuanweize/BTtrackers-updater/main/quick-install.sh | sudo bash
+```
+
+### 一键卸载
+
+```bash
+# 一键卸载
+curl -fsSL https://raw.githubusercontent.com/yuanweize/BTtrackers-updater/main/quick-uninstall.sh | sudo bash
+```
 
 ## 安装和配置
 
 ### 1. 环境要求
 
 - Python 3.6+
-- requests 库
+- requests 库 (安装脚本会自动安装)
+
+### 2. 其他安装方式
+
+#### 方法1: Git 克隆
 
 ```bash
-pip3 install requests
+# 克隆项目
+git clone https://github.com/yuanweize/BTtrackers-updater.git
+cd BTtrackers-updater
+
+# 运行安装脚本
+sudo ./install.sh
 ```
 
-### 2. 下载和配置
+#### 方法2: 下载压缩包
 
 ```bash
-# 创建工作目录
-sudo mkdir -p /opt/bt-tracker-updater
-cd /opt/bt-tracker-updater
+# 下载最新版本
+wget https://github.com/yuanweize/BTtrackers-updater/archive/main.zip
+unzip main.zip
+cd BTtrackers-updater-main
 
-# 下载脚本文件
-# 将 update_bt_trackers.py 和 config.json 放到此目录
+# 运行安装脚本
+sudo ./install.sh
+```
 
-# 设置权限
-sudo chown -R aria2:aria2 /opt/bt-tracker-updater
-sudo chmod +x update_bt_trackers.py
+#### 方法3: 仅下载安装脚本
+
+```bash
+# 下载并运行安装脚本
+curl -fsSL https://raw.githubusercontent.com/yuanweize/BTtrackers-updater/main/install.sh | sudo bash
 ```
 
 ### 3. 配置文件说明
@@ -61,11 +103,19 @@ sudo chmod +x update_bt_trackers.py
 
 ## 使用方法
 
-### 快速安装
+### 验证安装
+
+安装完成后，可以验证是否正常工作：
 
 ```bash
-# 下载所有文件到当前目录后运行
-sudo ./install.sh
+# 测试运行（预览模式，不会修改文件）
+bt-tracker-update --dry-run
+
+# 查看帮助信息
+bt-tracker-update --help
+
+# 查看版本信息
+bt-tracker-update --version
 ```
 
 ### 手动运行

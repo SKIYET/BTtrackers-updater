@@ -10,11 +10,23 @@ SERVICE_USER="aria2"
 SERVICE_GROUP="aria2"
 
 echo "=== Aria2 BT Tracker 更新工具安装脚本 ==="
+echo "项目地址: https://github.com/yuanweize/BTtrackers-updater"
+echo ""
 
 # 检查是否为 root 用户
 if [[ $EUID -ne 0 ]]; then
    echo "错误: 请使用 root 权限运行此脚本"
+   echo "请使用: sudo $0"
    exit 1
+fi
+
+# 检查系统类型
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    echo "检测到 Linux 系统"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "检测到 macOS 系统"
+else
+    echo "警告: 未知系统类型，可能需要手动调整"
 fi
 
 # 检查 Python3 是否安装
@@ -46,9 +58,17 @@ mkdir -p "$INSTALL_DIR"
 
 # 复制文件
 echo "复制程序文件..."
+
+# 检查文件是否存在
+if [ ! -f "update_bt_trackers.py" ]; then
+    echo "错误: 未找到 update_bt_trackers.py 文件"
+    echo "请确保在项目根目录下运行此脚本"
+    exit 1
+fi
+
 cp update_bt_trackers.py "$INSTALL_DIR/"
 cp config.json "$INSTALL_DIR/"
-cp README.md "$INSTALL_DIR/"
+[ -f "README.md" ] && cp README.md "$INSTALL_DIR/"
 
 # 设置权限
 chmod +x "$INSTALL_DIR/update_bt_trackers.py"
