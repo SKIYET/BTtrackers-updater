@@ -8,6 +8,7 @@ import logging
 import time
 import argparse
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -30,7 +31,16 @@ class Config:
             "request_timeout": 10,
             "max_retries": 3,
             "log_level": "INFO",
-            "log_file": "bt_tracker_update.log"
+            "log_file": "bt_tracker_update.log",
+            "rpc": {
+                "enabled": False,
+                "url": "http://localhost:6800/jsonrpc",
+                "secret": "",
+                "timeout": 10,
+                "verify_ssl": True
+            },
+            "update_mode": "config",
+            "fallback_to_config": True
         }
         
         if os.path.exists(self.config_file):
@@ -56,6 +66,129 @@ class Config:
     def get(self, key, default=None):
         """获取配置项"""
         return self.config.get(key, default)
+
+
+class Aria2RPC:
+    """Aria2 JSON-RPC 客户端"""
+    
+    def __init__(self, rpc_config):
+        self.url = rpc_config.get('url', 'http://localhost:6800/jsonrpc')
+        self.secret = rpc_config.get('secret', '')
+        self.timeout = rpc_config.get('timeout', 10)
+        self.verify_ssl = rpc_config.get('verify_ssl', True)
+        
+        # 构建RPC URL
+        if not self.url.endswith('/jsonrpc'):
+            if self.url.endswith('/'):
+                self.url += 'jsonrpc'
+            else:
+                self.url += '/jsonrpc'
+    
+    def _build_request(self, method, params=None):
+        """构建JSON-RPC请求"""
+        request_id = str(uuid.uuid4())
+        
+        # 如果有secret，添加到参数开头
+        if self.secret:
+            if params is None:
+                params = [f"token:{self.secret}"]
+            else:
+                params.insert(0, f"token:{self.secret}")
+        
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": method,
+            "params": params or []
+        }
+    
+    def _make_request(self, method, params=None):
+        """发送RPC请求"""
+        request_data = self._build_request(method, params)
+        
+        try:
+            response = requests.post(
+                self.url,
+                json=request_data,
+                timeout=self.timeout,
+                verify=self.verify_ssl,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"HTTP {response.status_code}: {response.text}")
+            
+            result = response.json()
+            
+            if 'error' in result:
+                error = result['error']
+                raise Exception(f"RPC Error {error.get('code', 'Unknown')}: {error.get('message', 'Unknown error')}")
+            
+            return result.get('result')
+            
+        except requests.exceptions.Timeout:
+            raise Exception(f"RPC请求超时 ({self.timeout}s)")
+        except requests.exceptions.ConnectionError:
+            raise Exception("无法连接到Aria2 RPC服务")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"RPC请求失败: {e}")
+        except json.JSONDecodeError:
+            raise Exception("RPC响应不是有效的JSON")
+    
+    def test_connection(self):
+        """测试RPC连接"""
+        try:
+            version = self.get_version()
+            logging.info(f"成功连接到Aria2 RPC，版本: {version.get('version', 'Unknown')}")
+            return True
+        except Exception as e:
+            logging.error(f"RPC连接测试失败: {e}")
+            return False
+    
+    def get_version(self):
+        """获取Aria2版本信息"""
+        return self._make_request("aria2.getVersion")
+    
+    def get_global_option(self):
+        """获取全局选项"""
+        return self._make_request("aria2.getGlobalOption")
+    
+    def change_global_option(self, options):
+        """修改全局选项"""
+        return self._make_request("aria2.changeGlobalOption", [options])
+    
+    def get_bt_tracker(self):
+        """获取当前的bt-tracker配置"""
+        try:
+            options = self.get_global_option()
+            tracker_str = options.get('bt-tracker', '')
+            if tracker_str:
+                return [t.strip() for t in tracker_str.split(',') if t.strip()]
+            return []
+        except Exception as e:
+            logging.error(f"获取bt-tracker失败: {e}")
+            return []
+    
+    def update_bt_tracker(self, trackers):
+        """更新bt-tracker配置"""
+        if not trackers:
+            logging.warning("没有tracker可以更新")
+            return False
+        
+        tracker_str = ','.join(trackers)
+        
+        try:
+            logging.info(f"通过RPC更新bt-tracker，共{len(trackers)}个tracker")
+            
+            # 更新bt-tracker选项
+            result = self.change_global_option({'bt-tracker': tracker_str})
+            
+            logging.info("RPC更新bt-tracker成功")
+            return True
+            
+        except Exception as e:
+            logging.error(f"RPC更新bt-tracker失败: {e}")
+            return False
 
 
 def setup_logging(config):
@@ -213,8 +346,104 @@ def validate_config_file(conf_path):
     return True
 
 
-def update_bt_trackers(config):
-    """更新 bt-tracker 配置"""
+def update_bt_trackers_via_rpc(config):
+    """通过RPC更新bt-tracker配置"""
+    rpc_config = config.get('rpc', {})
+    
+    if not rpc_config.get('enabled', False):
+        logging.error("RPC功能未启用")
+        return False
+    
+    logging.info("开始通过RPC更新bt-tracker配置")
+    
+    try:
+        # 创建RPC客户端
+        rpc_client = Aria2RPC(rpc_config)
+        
+        # 测试连接
+        if not rpc_client.test_connection():
+            return False
+        
+        # 获取现有tracker
+        old_trackers = rpc_client.get_bt_tracker()
+        old_set = set(old_trackers)
+        logging.info(f"当前RPC中tracker数量: {len(old_set)}")
+        
+        # 获取新的tracker
+        new_trackers = fetch_trackers(config)
+        if not new_trackers:
+            logging.warning("未获取到任何新的tracker")
+            return False
+        
+        # 合并和去重
+        combined_set = old_set.union(set(new_trackers))
+        combined_list = sorted(combined_set)
+        
+        # 更新tracker
+        if rpc_client.update_bt_tracker(combined_list):
+            # 统计和日志
+            added = combined_set - old_set
+            
+            logging.info(f"RPC bt-tracker更新完成，总数: {len(combined_list)}")
+            
+            if added:
+                logging.info(f"新增 {len(added)} 个tracker:")
+                for tracker in sorted(added):
+                    logging.info(f"  + {tracker}")
+            else:
+                logging.info("没有新增tracker")
+            
+            return True
+        else:
+            return False
+            
+    except Exception as e:
+        logging.error(f"RPC更新过程中发生错误: {e}")
+        return False
+
+
+def update_bt_trackers_hybrid(config):
+    """混合更新模式：同时更新配置文件和RPC"""
+    logging.info("开始混合模式更新（配置文件 + RPC）")
+    
+    config_success = False
+    rpc_success = False
+    
+    # 尝试更新配置文件
+    try:
+        config_success = update_bt_trackers_config_only(config)
+        if config_success:
+            logging.info("配置文件更新成功")
+        else:
+            logging.warning("配置文件更新失败")
+    except Exception as e:
+        logging.error(f"配置文件更新异常: {e}")
+    
+    # 尝试RPC更新
+    rpc_config = config.get('rpc', {})
+    if rpc_config.get('enabled', False):
+        try:
+            rpc_success = update_bt_trackers_via_rpc(config)
+            if rpc_success:
+                logging.info("RPC更新成功")
+            else:
+                logging.warning("RPC更新失败")
+        except Exception as e:
+            logging.error(f"RPC更新异常: {e}")
+    else:
+        logging.info("RPC功能未启用，跳过RPC更新")
+    
+    # 判断总体结果
+    if config_success or rpc_success:
+        logging.info("混合更新至少有一种方式成功")
+        return True
+    else:
+        logging.error("混合更新全部失败")
+        return False
+
+
+def update_bt_trackers_config_only(config):
+    """仅更新配置文件的bt-tracker"""
     conf_path = config.get('aria2_conf_path')
     
     logging.info(f"开始更新 bt-tracker 配置: {conf_path}")
@@ -295,6 +524,37 @@ def update_bt_trackers(config):
         logging.error(f"更新配置文件时发生错误: {e}")
         return False
 
+
+def update_bt_trackers(config):
+    """统一的bt-tracker更新入口函数"""
+    update_mode = config.get('update_mode', 'config')
+    rpc_config = config.get('rpc', {})
+    fallback_to_config = config.get('fallback_to_config', True)
+    
+    if update_mode == 'rpc':
+        # 仅使用RPC更新
+        if rpc_config.get('enabled', False):
+            success = update_bt_trackers_via_rpc(config)
+            if not success and fallback_to_config:
+                logging.info("RPC更新失败，回退到配置文件更新")
+                return update_bt_trackers_config_only(config)
+            return success
+        else:
+            logging.error("RPC模式已选择但RPC未启用")
+            if fallback_to_config:
+                logging.info("回退到配置文件更新")
+                return update_bt_trackers_config_only(config)
+            return False
+    
+    elif update_mode == 'hybrid':
+        # 混合模式
+        return update_bt_trackers_hybrid(config)
+    
+    else:
+        # 默认：仅配置文件更新
+        return update_bt_trackers_config_only(config)
+
+
 def parse_arguments():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
@@ -308,6 +568,13 @@ def parse_arguments():
   %(prog)s --aria2-conf /path/to/aria2.conf  # 指定 aria2 配置文件路径
   %(prog)s -v                       # 详细输出模式
   %(prog)s --list-sources           # 列出所有 tracker 源
+  
+RPC 模式示例:
+  %(prog)s --test-rpc               # 测试RPC连接
+  %(prog)s --rpc                    # 使用RPC模式（需先在配置文件中启用）
+  %(prog)s --rpc-url http://localhost:6800/jsonrpc --rpc-secret mysecret  # 使用指定RPC参数
+  %(prog)s --update-mode hybrid     # 同时更新配置文件和RPC
+  %(prog)s --update-mode rpc        # 仅通过RPC更新
         """
     )
     
@@ -357,7 +624,66 @@ def parse_arguments():
         version='%(prog)s 1.3.0'
     )
     
+    # RPC相关参数
+    parser.add_argument(
+        '--rpc',
+        action='store_true',
+        help='使用RPC模式更新tracker（需要先在配置文件中启用RPC）'
+    )
+    
+    parser.add_argument(
+        '--rpc-url',
+        help='Aria2 RPC URL (例如: http://localhost:6800/jsonrpc)'
+    )
+    
+    parser.add_argument(
+        '--rpc-secret',
+        help='Aria2 RPC访问密钥'
+    )
+    
+    parser.add_argument(
+        '--update-mode',
+        choices=['config', 'rpc', 'hybrid'],
+        help='更新模式: config=仅配置文件, rpc=仅RPC, hybrid=同时更新两者'
+    )
+    
+    parser.add_argument(
+        '--test-rpc',
+        action='store_true',
+        help='测试RPC连接并显示Aria2版本信息'
+    )
+    
     return parser.parse_args()
+
+
+def test_rpc_connection(config):
+    """测试RPC连接"""
+    rpc_config = config.get('rpc', {})
+    
+    if not rpc_config.get('enabled', False):
+        logging.error("RPC功能未启用，请检查配置文件")
+        return False
+    
+    try:
+        rpc_client = Aria2RPC(rpc_config)
+        if rpc_client.test_connection():
+            # 获取并显示详细信息
+            version_info = rpc_client.get_version()
+            options = rpc_client.get_global_option()
+            current_trackers = rpc_client.get_bt_tracker()
+            
+            logging.info("=== Aria2 RPC连接信息 ===")
+            logging.info(f"版本: {version_info.get('version', 'Unknown')}")
+            logging.info(f"功能: {', '.join(version_info.get('enabledFeatures', []))}")
+            logging.info(f"RPC URL: {rpc_client.url}")
+            logging.info(f"当前bt-tracker数量: {len(current_trackers)}")
+            logging.info("=== 连接测试成功 ===")
+            return True
+        else:
+            return False
+    except Exception as e:
+        logging.error(f"RPC连接测试失败: {e}")
+        return False
 
 
 def list_tracker_sources(config):
@@ -441,6 +767,38 @@ def main():
         if args.log_file:
             config.config['log_file'] = args.log_file
         
+        # RPC相关参数覆盖
+        if args.rpc or args.rpc_url or args.rpc_secret:
+            # 如果没有rpc配置，创建默认的
+            if 'rpc' not in config.config:
+                config.config['rpc'] = {
+                    'enabled': False,
+                    'url': 'http://localhost:6800/jsonrpc',
+                    'secret': '',
+                    'timeout': 10,
+                    'verify_ssl': True
+                }
+            
+            # 启用RPC
+            if args.rpc:
+                config.config['rpc']['enabled'] = True
+            
+            # 覆盖RPC URL
+            if args.rpc_url:
+                config.config['rpc']['url'] = args.rpc_url
+                config.config['rpc']['enabled'] = True
+            
+            # 覆盖RPC密钥
+            if args.rpc_secret:
+                config.config['rpc']['secret'] = args.rpc_secret
+                config.config['rpc']['enabled'] = True
+        
+        # 设置更新模式
+        if args.update_mode:
+            config.config['update_mode'] = args.update_mode
+        elif args.rpc:
+            config.config['update_mode'] = 'rpc'
+        
         # 设置日志
         setup_logging(config)
         
@@ -449,11 +807,23 @@ def main():
             list_tracker_sources(config)
             return
         
+        if args.test_rpc:
+            test_rpc_connection(config)
+            return
+        
         logging.info("=" * 50)
         logging.info("Aria2 BT Tracker 更新工具启动")
         logging.info(f"启动时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logging.info(f"配置文件: {args.config}")
         logging.info(f"Aria2 配置: {config.get('aria2_conf_path')}")
+        logging.info(f"更新模式: {config.get('update_mode', 'config')}")
+        
+        # 显示RPC信息
+        rpc_config = config.get('rpc', {})
+        if rpc_config.get('enabled', False):
+            logging.info(f"RPC URL: {rpc_config.get('url', 'N/A')}")
+            logging.info(f"RPC密钥: {'已设置' if rpc_config.get('secret') else '未设置'}")
+        
         if args.dry_run:
             logging.info("运行模式: 预览模式")
         logging.info("=" * 50)

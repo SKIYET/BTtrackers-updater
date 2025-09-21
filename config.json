@@ -11,5 +11,14 @@
   "request_timeout": 10,
   "max_retries": 3,
   "log_level": "INFO",
-  "log_file": "bt_tracker_update.log"
+  "log_file": "bt_tracker_update.log",
+  "rpc": {
+    "enabled": false,
+    "url": "http://localhost:6800/jsonrpc",
+    "secret": "",
+    "timeout": 10,
+    "verify_ssl": true
+  },
+  "update_mode": "config",
+  "fallback_to_config": true
 }
